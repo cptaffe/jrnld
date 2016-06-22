@@ -52,9 +52,9 @@ int jrnld() {
 }
 
 int main() {
-  //pid_t p = fork();
-  //assert(p >= 0);
-  //if (p > 0)
-  //  exit(0);
+  pid_t p = fork();
+  assert(p >= 0);
+  if (p > 0)
+    exit(0);
   exit(jrnld() < 0 ? EXIT_FAILURE : EXIT_SUCCESS);
 }
