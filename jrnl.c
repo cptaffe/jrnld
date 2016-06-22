@@ -15,23 +15,27 @@
 #include "jrnl.h"
 
 void jrnl_init(struct jrnl *j) {
+  int lsz;
+  char *log;
   assert(j != NULL);
-  int lsz = snprintf(NULL, 0, "/var/log/jrnld.%x.log", getpid());
+  lsz = snprintf(NULL, 0, "/var/log/jrnld.%x.log", getpid());
   if (lsz < 0) {
     err(1, "couldn't format path");
   }
-  char *log = calloc(sizeof(char), (size_t)lsz+1);
+  log = calloc(sizeof(char), (size_t)lsz+1);
   if (log == NULL) {
     err(1, "couldn't allocate memory");
   }
   memset(j, sizeof(struct jrnl), 0); /* zero jrnl */
-  if (snprintf(log, sizeof(log), "/var/log/jrnld.%x.log", getpid()) < 0) {
+  if (snprintf(log, (size_t)lsz+1, "/var/log/jrnld.%x.log", getpid()) != lsz) {
     err(1, "couldn't format path");
   }
-  j->log = open(log, O_CREAT | O_APPEND);
+  j->log = open(log, O_CREAT | O_WRONLY);
   if (j->log < 0) {
     err(1, "couldn't open log");
   }
+  free(log);
+  j->logger = jrnl_time_logger;
 }
 
 void jrnl_fini(struct jrnl *j) {
@@ -41,41 +45,75 @@ void jrnl_fini(struct jrnl *j) {
   }
 }
 
+/* handler returns an allocated string */
+ssize_t jrnl_time_logger(struct jrnl *j, const char *msg, char **out) {
+  time_t raw;
+  struct tm *gmt;
+  int sbsz;
+  size_t tbsz;
+  char *tbuf, *sbuf;
+  /* fmt time to tbuf */
+  time(&raw);
+  gmt = gmtime(&raw);
+  if (gmt == NULL) {
+    return -1;
+  }
+  tbsz = 200; /* 200 is taken from the man page */
+  tbuf = calloc(sizeof(char), tbsz);
+  if (tbuf == NULL) {
+    return -1;
+  }
+  strftime(tbuf, tbsz, "%c", gmtime(&raw));
+  /* format tbuf and buf to sbuf */
+  sbsz = snprintf(NULL, 0, "%s: %s\n", tbuf, msg);
+  if (sbsz < 0) {
+    return -1;
+  }
+  sbuf = calloc(sizeof(char), (size_t)sbsz+1);
+  if (sbuf == NULL) {
+    return -1;
+  }
+  if (snprintf(sbuf, (size_t)sbsz+1, "%s: %s\n", tbuf, msg) != sbsz) {
+    return -1;
+  }
+  free(tbuf); /* cleanup */
+  *out = sbuf;
+  return (ssize_t)sbsz;
+}
+
 /* jrnl_logf: printf-style formatted logging  */
 void jrnl_logf(struct jrnl *j, char *fmt, ...) {
   va_list ap;
-  /* allocate buffer */
-  int bsz = vsnprintf(NULL, 0, fmt, ap);
+  int bsz;
+  ssize_t sbsz;
+  char *buf, *sbuf = NULL;
+  va_start(ap, fmt);
+  /* fmt to buf */
+  bsz = vsnprintf(NULL, 0, fmt, ap);
   if (bsz < 0) {
     err(1, "couldn't format log entry");
   }
-  char *buf = calloc(sizeof(char), (size_t)bsz);
+  buf = calloc(sizeof(char), (size_t)bsz+1);
   if (buf == NULL) {
     err(1, "couldn't allocate memory");
   }
-  /* print fmt to buf */
-  va_start(ap, fmt);
-  if (vsnprintf(buf, sizeof(buf), fmt, ap) < 0) {
+  if (vsnprintf(buf, (size_t)bsz+1, fmt, ap) != bsz) {
     err(1, "couldn't format log entry");
   }
   va_end(ap);
-  /* log to file with time */
-  time_t rtime;
-  time(&rtime);
-  int sbsz = snprintf(NULL, 0, "%s: %s\n", ctime(&rtime), buf);
-  if (sbsz < 0) {
-    err(1, "couldn't format log entry");
+  /* logger formats message */
+  sbsz = j->logger(j, buf, &sbuf);
+  if (sbsz < 0 || sbuf == NULL) {
+    err(1, "logger couldn't format entry");
   }
-  char *sbuf = calloc(sizeof(char), (size_t)sbsz+1);
-  if (sbuf == NULL) {
-    err(1, "couldn't allocate memory");
-  }
-  if (snprintf(sbuf, (size_t)sbsz, "%s: %s\n", ctime(&rtime), buf) < 0) {
-    err(1, "couldn't format log entry");
-  }
-  free(buf);
-  if (write(j->log, sbuf, (size_t)sbsz) < 0) {
+  free(buf); /* cleanup */
+  /* write to log */
+  if (write(j->log, sbuf, (size_t)sbsz) != (ssize_t)sbsz) {
     err(1, "couldn't write log entry");
   }
-  free(sbuf);
+  free(sbuf); /* cleanup */
+}
+
+void jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock)) {
+  jrnl_logf(j, "listening...");
 }
