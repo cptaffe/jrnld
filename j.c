@@ -20,35 +20,25 @@ int jrnld(void);
 int jrnld_listen_handler(struct jrnl *j, int sock);
 
 int jrnld_listen_handler(struct jrnl *j, int sock) {
+  jrnl_logf(j, "handler with %d!", sock);
   return 0;
 }
 
 int jrnld() {
   struct jrnl j;
-  assert(umask(0) > 0);
-  jrnl_init(&j);
-  /* set new sid */
-  if (setsid() < 0) {
-    jrnl_logf(&j, "setsid(): %s", strerror(errno));
-    return -1;
-  }
-  /* chdir to root */
-  if (chdir("/") < 0) {
-    jrnl_logf(&j, "chdir(/): %s", strerror(errno));
-    return -1;
-  }
+  umask(0);
+  assert(setsid() != -1);
+  assert(chdir("/") != -1);
   /* close standard fds */
   int fds[3] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
   for (size_t i = 0; i < (sizeof(fds)/sizeof(int)); i++) {
-    if (close(fds[i]) < 0) {
-      jrnl_logf(&j, "close(%d): %s", fds[i], strerror(errno));
-      return -1;
-    }
+    assert(close(fds[i]) != -1);
   }
+  jrnl_init(&j);
   jrnl_logf(&j, "jrnld here");
   jrnl_listen(&j, jrnld_listen_handler);
-  jrnl_fini(&j);
-  return 0;
+  /* jrnl_fini(&j);
+     return 0; */
 }
 
 int main() {
