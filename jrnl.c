@@ -25,21 +25,28 @@ static const char *JRNL_LOG_PATH = "/var/log/jrnl.log";
 static void jrnl_server_init(struct jrnl *j) {
   struct sockaddr_un jrnls;
   assert(j != NULL);
+
+  /* create socket */
   j->sock = socket(AF_UNIX, SOCK_STREAM, 0);
   if (j->sock == -1)
     jrnl_logf(j, "couldn't create socket: %s", strerror(errno));
+
+  /* bind socket */
   memset(&jrnls, 0, sizeof(jrnls));
   jrnls.sun_family = AF_UNIX;
   strncpy(jrnls.sun_path, "/var/run/jrnl.sock", sizeof(jrnls.sun_path)-1);
-  if (bind(j->sock, (struct sockaddr *)&jrnls, sizeof(jrnls)) == -1) {
+  if (bind(j->sock, (struct sockaddr *)&jrnls, sizeof(jrnls)) == -1)
     jrnl_logf(j, "couldn't bind socket: %s", strerror(errno));
-  }
+
+  /* listen on socket */
   if (listen(j->sock, 64) == -1)
     jrnl_logf(j, "couldn't listen on socket: %s", strerror(errno));
 }
 
 static void jrnl_log_init(struct jrnl *j) {
   assert(j != NULL);
+
+  /* open */
   j->log = open(JRNL_LOG_PATH, O_CREAT | O_WRONLY);
   if (j->log < 0)
     err(1, "couldn't open log");
@@ -54,8 +61,12 @@ void jrnl_init(struct jrnl *j) {
 
 void jrnl_fini(struct jrnl *j) {
   assert(j != NULL);
+
+  /* unlink socket */
   if (unlink(JRNL_SOCKET_PATH) == -1)
     jrnl_logf(j, "couldn't close socket: %s", strerror(errno));
+
+  /* close log */
   if (close(j->log) == -1)
     warn("couldn't close log");
 }
@@ -111,14 +122,13 @@ void jrnl_vlogf(struct jrnl *j, char *fmt, va_list ap) {
 
   /* write */
   if (write(j->log, sbuf, (size_t)sbsz) != (ssize_t)sbsz)
-    err(1, "couldn't write log entry");
+    err(1, "couldn't write to log");
 
   /* cleanup */
   free(buf);
   free(sbuf);
 }
 
-/* jrnl_logf: printf-style formatted logging  */
 __attribute__((__format__(__printf__, 2, 3)))
 void jrnl_logf(struct jrnl *j, char *fmt, ...) {
   va_list ap;
@@ -131,16 +141,24 @@ void jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock)) {
   struct sockaddr_un pa;
   socklen_t pasz = sizeof(pa);
   int peer;
+
+  /* start listening */
   jrnl_server_init(j);
+
+  /* accept loop */
   for (;;) {
     pid_t child;
+
+    /* accept connection */
     peer = accept(j->sock, (struct sockaddr *) &pa, &pasz);
     if (peer == -1) {
-      jrnl_logf(j, "couldn't accept on socket: %s", strerror(errno));
+      jrnl_logf(j, "couldn't accept connection: %s", strerror(errno));
     }
+
+    /* fork to worker */
     child = fork();
     if (child == -1) {
-      jrnl_logf(j, "couldn't fork: %s", strerror(errno));
+      jrnl_logf(j, "couldn't fork worker: %s", strerror(errno));
     } else if (child == 0) {
       handler(j, peer);
     }
