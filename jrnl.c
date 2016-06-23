@@ -100,8 +100,53 @@ ssize_t jrnl_time_logger(struct jrnl *j __attribute__((unused)), const char *msg
   return (ssize_t)sbsz;
 }
 
+enum jrnl_log_level {
+  JRNL_LOG_WARN,
+  JRNL_LOG_ERR,
+  JRNL_LOG_FATAL,
+};
+
+/* write string to log */
+static void jrnl_log(struct jrnl *j, enum jrnl_log_level lvl, const char *str) {
+  char *buf, *prefix = NULL;
+  size_t bufsz, psz;
+  assert(str != NULL);
+
+  /* generate prefix */
+  switch(lvl) {
+  case JRNL_LOG_WARN:
+    prefix = "warning: ";
+    break;
+  case JRNL_LOG_ERR:
+    prefix = "error: ";
+    break;
+  case JRNL_LOG_FATAL:
+    prefix = "fatal: ";
+    break;
+  }
+  assert(prefix != NULL);
+
+  /* generate buffer */
+  psz = strlen(prefix);
+  bufsz = psz+strlen(str);
+  buf = calloc(sizeof(char), bufsz+1);
+  assert(buf != NULL);
+  strncpy(buf, prefix, bufsz);
+  strncpy(&buf[psz], str, bufsz-psz);
+
+  /* write */
+  assert(write(j->log, buf, bufsz) == (ssize_t)bufsz);
+
+  /* clean up */
+  free(buf);
+
+  /* fatal */
+  if (lvl == JRNL_LOG_FATAL)
+    exit(EXIT_FAILURE);
+}
+
 __attribute__((__format__(__printf__, 2, 0)))
-void jrnl_vlogf(struct jrnl *j, char *fmt, va_list ap) {
+void jrnl_vlogf(struct jrnl *j, const char *fmt, va_list ap) {
   int bsz;
   ssize_t sbsz;
   char *buf, *sbuf = NULL;
@@ -109,21 +154,21 @@ void jrnl_vlogf(struct jrnl *j, char *fmt, va_list ap) {
   /* fmt */
   bsz = vsnprintf(NULL, 0, fmt, ap);
   if (bsz == -1)
-    err(1, "couldn't format log entry");
+    jrnl_log(j, JRNL_LOG_FATAL, "couldn't format log entry");
   buf = calloc(sizeof(char), (size_t)bsz+1);
   if (buf == NULL)
-    err(1, "couldn't allocate memory");
+    jrnl_log(j, JRNL_LOG_FATAL, "couldn't allocate memory");
   if (vsnprintf(buf, (size_t)bsz+1, fmt, ap) != bsz)
-    err(1, "couldn't format log entry");
+    jrnl_log(j, JRNL_LOG_FATAL, "couldn't format log entry");
 
   /* logger */
   sbsz = j->logger(j, buf, &sbuf);
   if (sbsz == -1 || sbuf == NULL)
-    err(1, "logger couldn't format entry");
+    jrnl_log(j, JRNL_LOG_FATAL, "logger couldn't format entry");
 
   /* write */
   if (write(j->log, sbuf, (size_t)sbsz) != (ssize_t)sbsz)
-    err(1, "couldn't write to log");
+    jrnl_log(j, JRNL_LOG_FATAL, "couldn't write to log");
 
   /* cleanup */
   free(buf);
@@ -131,7 +176,7 @@ void jrnl_vlogf(struct jrnl *j, char *fmt, va_list ap) {
 }
 
 __attribute__((__format__(__printf__, 2, 3)))
-void jrnl_logf(struct jrnl *j, char *fmt, ...) {
+void jrnl_logf(struct jrnl *j, const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   jrnl_vlogf(j, fmt, ap);
