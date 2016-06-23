@@ -1,0 +1,16 @@
+cflags = --std=c11 -Wall -Wextra -pedantic -pedantic-errors -Wno-padded -Werror -D_GNU_SOURCE
+
+rule cc
+  command = clang -MMD -MF $out.d $cflags -c $in -o $out
+  description = Compile C source files
+  depfile = $out.d
+  deps = gcc
+
+rule link
+  command = clang $in -o $out
+  description = Link objects
+
+build j.o : cc j.c
+build jrnl.o : cc jrnl.c
+
+build jrnld : link j.o jrnl.o

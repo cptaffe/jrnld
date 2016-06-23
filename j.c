@@ -26,14 +26,14 @@ int jrnld_listen_handler(struct jrnl *j, int sock) {
 
 int jrnld() {
   struct jrnl j;
+  size_t i;
+  int fds[3] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
   umask(0);
   assert(setsid() != -1);
   assert(chdir("/") != -1);
   /* close standard fds */
-  int fds[3] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
-  for (size_t i = 0; i < (sizeof(fds)/sizeof(int)); i++) {
+  for (i = 0; i < (sizeof(fds)/sizeof(int)); i++)
     assert(close(fds[i]) != -1);
-  }
   jrnl_init(&j);
   jrnl_logf(&j, "jrnld here");
   jrnl_listen(&j, jrnld_listen_handler);

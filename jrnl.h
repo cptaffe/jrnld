@@ -1,4 +1,5 @@
 /* Copyright 2016 Connor Taffe */
+
 #ifndef JRNL_H_
 #define JRNL_H_
 
@@ -15,4 +16,4 @@ void __attribute__((noreturn))
   jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock));
 ssize_t jrnl_time_logger(struct jrnl *j, const char *msg, char **out);
 
-#endif // JRNL_H_
+#endif /* JRNL_H_ */
