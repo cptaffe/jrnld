@@ -91,9 +91,10 @@ ssize_t jrnl_time_logger(struct jrnl *j __attribute__((unused)), const char *msg
   sbuf = calloc(sizeof(char), (size_t)sbsz+1);
   if (sbuf == NULL)
     return -1;
-  if (snprintf(sbuf, (size_t)sbsz+1, "%s: %s\n", tbuf, msg) != sbsz)
+  if (snprintf(sbuf, (size_t)sbsz+1, "%s: %s\n", tbuf, msg) != sbsz) {
+    free(sbuf);
     return -1;
-
+  }
   /* result */
   *out = sbuf;
   return (ssize_t)sbsz;
