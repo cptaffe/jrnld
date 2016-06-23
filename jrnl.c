@@ -22,48 +22,35 @@
 static const char *JRNL_SOCKET_PATH = "/var/run/jrnl.sock";
 
 /* set up unix socket server */
-static int jrnl_server_init(struct jrnl *j) {
+static void jrnl_server_init(struct jrnl *j) {
   struct sockaddr_un jrnls;
   assert(j != NULL);
 
   /* unlink socket if exists (crash event, etc.) */
-  unlink(JRNL_SOCKET_PATH);
+  assert(unlink(JRNL_SOCKET_PATH) != -1 || errno == ENOENT);
 
   /* create socket */
   j->sock = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (j->sock == -1) {
-    syslog(LOG_ERR, "couldn't create socket: %s", strerror(errno));
-    return -1;
-  }
+  assert(j->sock != -1);
 
   /* bind socket */
   memset(&jrnls, 0, sizeof(jrnls));
   jrnls.sun_family = AF_UNIX;
   strncpy(jrnls.sun_path, "/var/run/jrnl.sock", sizeof(jrnls.sun_path)-1);
-  if (bind(j->sock, (struct sockaddr *)&jrnls, sizeof(jrnls)) == -1) {
-    syslog(LOG_ERR, "couldn't bind socket: %s", strerror(errno));
-    return -1;
-  }
-
-  /* listen on socket */
-  if (listen(j->sock, 64) == -1) {
-    syslog(LOG_ERR, "couldn't listen on socket: %s", strerror(errno));
-    return -1;
-  }
-  return 0;
+  assert(bind(j->sock, (struct sockaddr *)&jrnls, sizeof(jrnls)) != -1);
 }
 
 void jrnl_init(struct jrnl *j) {
   assert(j != NULL);
   memset(j, 0, sizeof(struct jrnl));
+  jrnl_server_init(j);
 }
 
 void jrnl_fini(struct jrnl *j) {
   assert(j != NULL);
 
   /* unlink socket */
-  if (unlink(JRNL_SOCKET_PATH) == -1)
-    syslog(LOG_ERR, "couldn't close socket: %s", strerror(errno));
+  assert(unlink(JRNL_SOCKET_PATH) != -1);
 }
 
 void jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock)) {
@@ -71,8 +58,8 @@ void jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock)) {
   socklen_t pasz = sizeof(pa);
   int peer;
 
-  /* start listening */
-  assert(jrnl_server_init(j) != -1);
+  /* listen on socket */
+  assert(listen(j->sock, 64) != -1);
 
   /* accept loop */
   for (;;) {

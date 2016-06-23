@@ -15,6 +15,10 @@
 #include <sys/stat.h>
 #include <signal.h>
 #include <syslog.h>
+#include <sys/syscall.h>
+#include <linux/types.h>
+#include <dirent.h>
+#include <linux/unistd.h>
 
 #include "jrnl.h"
 
@@ -53,39 +57,109 @@ static int jrnld_listen_handler(struct jrnl *j __attribute__((unused)), int sock
   return 0;
 }
 
-void jrnld(struct jrnld_config config) {
-  struct jrnl j;
-  size_t i;
-  int fds[3] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+extern char **environ;
 
-  /* fork */
-  if (config.daemon) {
-    pid_t p;
-    p = fork();
-    assert(p >= 0);
-    if (p > 0)
-      exit(0);
-  }
+/* init code needed by daemon before
+   completing startup, and by non-daemon mode */
+static void jinit(struct jrnl *j) {
+  uint id;
+  /* init jrnl before privilege drop */
+  openlog("jrnl", 0, LOG_DAEMON);
+  jrnl_init(j);
 
-  /* daemonize */
-  umask(0);
-  if (config.daemon)
-    assert(setsid() != -1);
-  assert(chdir("/") != -1);
-
-  /* close standard fds */
-  for (i = 0; i < (sizeof(fds)/sizeof(int)); i++)
-    assert(close(fds[i]) != -1);
+  /* drop privileges */
+  id = getuid();
+  assert(seteuid(id) != -1);
+  assert(setuid(id) != -1);
+  id = getgid();
+  assert(setegid(id) != -1);
+  assert(setgid(id) != -1);
 
   /* signal handlers */
   signal(SIGHUP, jrnld_signal_handler);
   signal(SIGTERM, jrnld_signal_handler);
+}
 
-  /* open log */
-  openlog("jrnl", 0, LOG_DAEMON);
+/* daemonize process */
+static void jdaemon(struct jrnl *j) {
 
-  /* initialize jrnl */
-  jrnl_init(&j);
+  int dir, chan[2], i, pidf, ret;
+  struct dirent dent;
+  pid_t pid;
+
+  /* close all entries in /proc/self/fd using getdents() */
+  dir = open("/proc/self/fd", O_RDONLY | O_DIRECTORY);
+  assert(dir != -1);
+  /* get first dent, close, repeat */
+  while (syscall(SYS_getdents, dir, &dent, sizeof(dent)) > 0)
+    assert(close(atoi(dent.d_name)) != -1);
+
+  /* reset signals */
+  for (i = 0; i < _NSIG; i++)
+    signal(i, SIG_DFL);
+
+  /* reset sigprocmask */
+  assert(sigprocmask(SIG_SETMASK, NULL, NULL) != -1);
+
+  /* clear environment */
+  for (i = 0; environ[i] != NULL; i++)
+    environ[i] = NULL;
+
+  /* create pipe */
+  assert(pipe(chan) != -1);
+
+  /* fork, finalize pipe */
+  pid = fork();
+  assert(pid != -1);
+  if (pid != 0) {
+    int r;
+    /* wait for daemon to initialize */
+    assert(close(chan[1]) != -1);
+    assert(read(chan[0], &r, sizeof(r)) == sizeof(r));
+    assert(close(chan[0]) != -1);
+    exit(r);
+  }
+  assert(close(chan[0]) != -1);
+
+  assert(setsid() != -1);
+
+  /* fork */
+  pid = fork();
+  assert(pid != -1);
+  if (pid != 0)
+    close(chan[1]);
+    exit(0);
+
+  /* replace in/out/err */
+  for (i = 0; i < 3; i++)
+    assert(open("/dev/null", O_RDWR) > 0);
+
+  umask(0);
+  assert(chdir("/") != -1);
+
+  /* pid file
+     TODO(cptaffe): locking */
+  pidf = open("/run/jrnl.pid", O_RDWR | O_CREAT | O_TRUNC);
+  assert(pidf != -1);
+  assert(dprintf(pidf, "%d\n", getpid()) > 0);
+
+  jinit(j); /* drop privileges, syslog, init j */
+
+  /* return success to parent */
+  ret = 0;
+  assert(write(chan[1], &ret, sizeof(ret)) == sizeof(ret));
+  assert(close(chan[1]) != -1);
+}
+
+void jrnld(struct jrnld_config config) {
+  struct jrnl j;
+
+  /* init */
+  if (config.daemon)
+    jdaemon(&j); /* returns in daemon process */
+  else
+    jinit(&j);
+
   syslog(LOG_INFO, "jrnld has successfully started");
 
   /* set global jrnl */
