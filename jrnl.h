@@ -7,9 +7,20 @@ struct jrnl {
   int sock;
 };
 
-void jrnl_init(struct jrnl *j);
-void jrnl_fini(struct jrnl *j);
-__attribute__((noreturn))
-void jrnl_listen(struct jrnl *j, int (*handler)(struct jrnl *j, int sock));
+typedef int
+(*jrnl_connection_handler)(struct jrnl *j, int sock)
+  __attribute__((nonnull(1)));
+
+extern void
+jrnl_init(struct jrnl *j)
+  __attribute__((nonnull(1)));
+
+extern void
+jrnl_fini(struct jrnl *j)
+  __attribute__((nonnull(1)));
+
+extern void
+jrnl_listen(struct jrnl *j, jrnl_connection_handler handler)
+  __attribute__((noreturn, nonnull(1, 2)));
 
 #endif /* JRNL_H_ */

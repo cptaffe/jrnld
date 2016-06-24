@@ -19,25 +19,97 @@
 #include <linux/types.h>
 #include <dirent.h>
 #include <linux/unistd.h>
+#include <sched.h>
+#include <sys/prctl.h>
+#include <linux/securebits.h>
 
 #include "jrnl.h"
 
-/* globals */
-static struct jrnl *g_jrnl = NULL;
+extern char **environ;
 
+/* constants */
+static const char JRNL_ROOT_PATH[] = "/var/jrnl";
+static const char JRNL_PID_PATH[] = "/jrnl.pid"; /* relative root */
+
+static const struct {
+  const char *daemon_short,
+    *daemon_long;
+} flags = {
+  "-d",
+  "--daemon"
+};
+
+/* config via flags */
 struct jrnld_config {
   bool daemon;
 };
 
-__attribute__((noreturn))
-void jrnld(struct jrnld_config config);
-static void jrnld_signal_handler(int sig);
-static int jrnld_listen_handler(struct jrnl *j, int sock);
-__attribute__((noreturn))
-static void usage(void);
-static struct jrnld_config check_args(int argc, char *argv[]);
+/* handler function prototype */
+typedef void
+(*jrnl_daemon_handler)(struct jrnl *j)
+  __attribute__((noreturn, nonnull(1)));
 
-static void jrnld_signal_handler(int signal) {
+/* daemon information */
+struct jrnl_daemon {
+  const char *path;
+  struct jrnl *jrnl;
+  int chan[2];
+  jrnl_daemon_handler handler;
+};
+
+/* startup return */
+enum jrnld_state {
+  JRNLD_OK,
+  JRNLD_EEXIST /* jrnld already running */
+};
+
+/* globals */
+static struct jrnl *g_jrnl = NULL;
+static struct jrnld_gret {
+  enum jrnld_state state;
+  int schan;
+} g_state = {
+  JRNLD_OK,
+  -1
+};
+
+/* prototypes */
+extern void
+jrnld(struct jrnld_config config)
+  __attribute__((noreturn));
+
+static void
+jrnld_signal_handler(int sig);
+
+static int
+jrnld_listen_handler(struct jrnl *j, int sock)
+  __attribute__((nonnull(1)));
+
+static void
+usage(void)
+  __attribute__((noreturn));
+
+static struct jrnld_config
+check_args(int argc, char *argv[])
+  __attribute__((nonnull(2)));
+
+static void
+jrnld_worker(struct jrnl *j)
+  __attribute__((noreturn, nonnull(1)));
+
+static void
+jrnld_init(struct jrnl *j)
+  __attribute__((nonnull(1)));
+
+static int
+jrnl_daemon(void *obj)
+  __attribute__((noreturn, nonnull(1)));
+
+static void
+jrnld_daemonize(struct jrnl_daemon *daemon)
+  __attribute__((noreturn, nonnull(1)));
+
+void jrnld_signal_handler(int signal) {
   struct jrnl *j;
   j = g_jrnl;
   assert(j != NULL);
@@ -49,19 +121,25 @@ static void jrnld_signal_handler(int signal) {
     syslog(LOG_CRIT, "SIGTERM heard, terminating...");
     jrnl_fini(j);
     exit(0);
+    break;
+  case SIGUSR1:
+    /* send a response to the parent */
+    assert(g_state.schan != -1);
+    assert(write(g_state.schan, &g_state.state, sizeof(g_state.state)) == sizeof(g_state.state));
+    assert(close(g_state.schan) != -1);
+    g_state.schan = -1;
+    break;
   }
 }
 
-static int jrnld_listen_handler(struct jrnl *j __attribute__((unused)), int sock) {
+int jrnld_listen_handler(struct jrnl *j __attribute__((unused)), int sock) {
   syslog(LOG_INFO, "handler with %d!", sock);
   return 0;
 }
 
-extern char **environ;
-
 /* init code needed by daemon before
    completing startup, and by non-daemon mode */
-static void jinit(struct jrnl *j) {
+void jrnld_init(struct jrnl *j) {
   uint id;
   /* init jrnl before privilege drop */
   openlog("jrnl", 0, LOG_DAEMON);
@@ -75,24 +153,75 @@ static void jinit(struct jrnl *j) {
   assert(setegid(id) != -1);
   assert(setgid(id) != -1);
 
+  /* global jrnl, used by handlers */
+  g_jrnl = j;
+
   /* signal handlers */
-  signal(SIGHUP, jrnld_signal_handler);
-  signal(SIGTERM, jrnld_signal_handler);
+  assert(signal(SIGHUP, jrnld_signal_handler) != SIG_ERR);
+  assert(signal(SIGTERM, jrnld_signal_handler) != SIG_ERR);
+  assert(signal(SIGUSR1, jrnld_signal_handler) != SIG_ERR);
+}
+
+/* handles new process */
+int jrnl_daemon(void *obj) {
+  int i, pidf;
+  struct jrnl_daemon *daemon;
+
+  /* parent kept for printing */
+  assert(close(1) != -1);
+
+  assert(obj != NULL);
+  daemon = (struct jrnl_daemon *)obj;
+
+  /* establish channel */
+  assert(close(daemon->chan[0]) != -1);
+  g_state.schan = daemon->chan[1];
+
+  /* session/process group leader */
+  assert(setsid() != -1);
+
+  umask(0);
+
+  /* replace in/out/err */
+  for (i = 0; i < 3; i++)
+    assert(open("/dev/null", O_RDWR) != -1);
+
+  /* disable set-uid & root */
+  prctl(PR_SET_SECUREBITS, SECBIT_NOROOT_LOCKED, 0, 0, 0);
+
+  /* chroot, only this process can change the file */
+  assert(mkdir(JRNL_ROOT_PATH, S_ISVTX) != -1 || errno == EEXIST);
+  assert(chroot(JRNL_ROOT_PATH) != -1);
+  assert(chdir("/") != -1);
+
+  /* pid file */
+  pidf = open(JRNL_PID_PATH, O_RDWR | O_CREAT | O_TRUNC);
+  assert(pidf != -1);
+  assert(dprintf(pidf, "%d\n", getpid()) > 0);
+  assert(close(pidf) != -1);
+
+  jrnld_init(daemon->jrnl); /* drop privileges, syslog, init j */
+
+  raise(SIGUSR1); /* success */
+
+  daemon->handler(daemon->jrnl);
 }
 
 /* daemonize process */
-static void jdaemon(struct jrnl *j) {
-
-  int dir, chan[2], i, pidf, ret;
+void jrnld_daemonize(struct jrnl_daemon *daemon) {
+  int dir, i, pid;
   struct dirent dent;
-  pid_t pid;
+  enum jrnld_state ret;
+
+  assert(daemon != NULL);
 
   /* close all entries in /proc/self/fd using getdents() */
   dir = open("/proc/self/fd", O_RDONLY | O_DIRECTORY);
   assert(dir != -1);
   /* get first dent, close, repeat */
   while (syscall(SYS_getdents, dir, &dent, sizeof(dent)) > 0)
-    assert(close(atoi(dent.d_name)) != -1);
+    if (strcmp(dent.d_name, "1") != 0) /* keep stdin */
+      assert(close(atoi(dent.d_name)) != -1);
 
   /* reset signals */
   for (i = 0; i < _NSIG; i++)
@@ -106,77 +235,67 @@ static void jdaemon(struct jrnl *j) {
     environ[i] = NULL;
 
   /* create pipe */
-  assert(pipe(chan) != -1);
+  assert(pipe(daemon->chan) != -1);
 
-  /* fork, finalize pipe */
+  /* fork
+     TODO: clone() with glibc causes numerous issues, try musl or -ffreestanding */
   pid = fork();
   assert(pid != -1);
-  if (pid != 0) {
-    int r;
-    /* wait for daemon to initialize */
-    assert(close(chan[1]) != -1);
-    assert(read(chan[0], &r, sizeof(r)) == sizeof(r));
-    assert(close(chan[0]) != -1);
-    exit(r);
+  if (pid == 0) {
+    jrnl_daemon((void *)daemon);
   }
-  assert(close(chan[0]) != -1);
 
-  assert(setsid() != -1);
-
-  /* fork */
-  pid = fork();
-  assert(pid != -1);
-  if (pid != 0)
-    close(chan[1]);
-    exit(0);
-
-  /* replace in/out/err */
-  for (i = 0; i < 3; i++)
-    assert(open("/dev/null", O_RDWR) > 0);
-
-  umask(0);
-  assert(chdir("/") != -1);
-
-  /* pid file
-     TODO(cptaffe): locking */
-  pidf = open("/run/jrnl.pid", O_RDWR | O_CREAT | O_TRUNC);
-  assert(pidf != -1);
-  assert(dprintf(pidf, "%d\n", getpid()) > 0);
-
-  jinit(j); /* drop privileges, syslog, init j */
-
-  /* return success to parent */
-  ret = 0;
-  assert(write(chan[1], &ret, sizeof(ret)) == sizeof(ret));
-  assert(close(chan[1]) != -1);
+  /* wait for daemon to initialize */
+  assert(close(daemon->chan[1]) != -1);
+  assert(read(daemon->chan[0], &ret, sizeof(ret)) == sizeof(ret));
+  assert(close(daemon->chan[0]) != -1);
+  switch (ret) {
+  case JRNLD_OK:
+    printf("Jrnld started correctly\n");
+    break;
+  default:
+    printf("Jrnld encountered an error\n");
+    break;
+  }
+  exit(ret);
 }
 
+/* post jrnld init */
+void jrnld_worker(struct jrnl *j) {
+  syslog(LOG_INFO, "jrnld has successfully started");
+  jrnl_listen(j, jrnld_listen_handler);
+}
+
+/* start jrnld */
 void jrnld(struct jrnld_config config) {
   struct jrnl j;
 
+  if (geteuid() != 0) {
+    printf("Jrnld must be run with euid=0, root\n");
+    exit(1);
+  }
+
+  memset(&j, 0, sizeof(j));
+  
   /* init */
-  if (config.daemon)
-    jdaemon(&j); /* returns in daemon process */
-  else
-    jinit(&j);
+  if (config.daemon) {
+    struct jrnl_daemon d;
 
-  syslog(LOG_INFO, "jrnld has successfully started");
+    memset(&d, 0, sizeof(d));
 
-  /* set global jrnl */
-  g_jrnl = &j;
+    d.path = JRNL_ROOT_PATH;
+    d.jrnl = &j;
+    d.handler = jrnld_worker;
 
-  jrnl_listen(&j, jrnld_listen_handler);
+    jrnld_daemonize(&d); /* returns in daemon process */
+  } else {
+    /* non-daemon mode */
+    jrnl_init(&j);
+    jrnld_worker(&j);
+  }
 }
 
-struct {
-  const char *daemon_short,
-    *daemon_long;
-} flags = {
-  "-d",
-  "--daemon"
-};
-
-static void usage() {
+void usage() {
   fprintf(stderr,
     "Usage: jrnld [OPTION]...\n"
     "Start the jrnl daemon and listen for connections\n"
@@ -188,7 +307,7 @@ static void usage() {
   exit(1);
 }
 
-static struct jrnld_config check_args(int argc, char *argv[]) {
+struct jrnld_config check_args(int argc, char *argv[]) {
   struct jrnld_config config;
   int i;
 
@@ -210,5 +329,4 @@ static struct jrnld_config check_args(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
   jrnld(check_args(argc, argv));
-  return 0;
 }
