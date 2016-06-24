@@ -8,4 +8,4 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} --std=c89 -Wall -Wextra -Wshadow -Wpointer-a
 # TODO: linker options are clang specific
 # -flto -fsanitize=undefined,memory,cfi")
 
-add_executable(jrnld j.c jrnl.c)
+add_executable(jrnld j.c jrnl.c jrnld.c)
