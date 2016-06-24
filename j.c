@@ -167,11 +167,11 @@ int jrnl_daemon(void *obj) {
   int i, pidf;
   struct jrnl_daemon *daemon;
 
-  /* parent kept for printing */
-  assert(close(1) != -1);
-
   assert(obj != NULL);
   daemon = (struct jrnl_daemon *)obj;
+
+  /* parent kept for printing */
+  assert(close(1) != -1);
 
   /* establish channel */
   assert(close(daemon->chan[0]) != -1);
