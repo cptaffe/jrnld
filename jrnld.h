@@ -2,6 +2,8 @@
 #ifndef JRNLD_H_
 #define JRNLD_H_
 
+#include <stdbool.h>
+
 struct jrnld_config {
   bool daemon;
 };
