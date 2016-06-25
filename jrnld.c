@@ -153,7 +153,7 @@ int jrnl_daemon(void *obj) {
   prctl(PR_SET_SECUREBITS, SECBIT_NOROOT_LOCKED, 0, 0, 0);
 
   /* chroot, only this process can change the file */
-  assert(mkdir(JRNL_ROOT_PATH, S_ISVTX) != -1 || errno == EEXIST);
+  assert(mkdir(JRNL_ROOT_PATH, 0) != -1 || errno == EEXIST);
   assert(chroot(JRNL_ROOT_PATH) != -1);
   assert(chdir("/") != -1);
 
