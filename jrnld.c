@@ -1,28 +1,28 @@
 /* Copyright 2016 Connor Taffe */
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <assert.h>
-#include <string.h>
-#include <unistd.h>
-#include <time.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <signal.h>
-#include <syslog.h>
-#include <sys/syscall.h>
+#include <linux/securebits.h>
 #include <linux/types.h>
-#include <dirent.h>
 #include <linux/unistd.h>
 #include <sched.h>
-#include <sys/prctl.h>
-#include <linux/securebits.h>
 #include <signal.h>
+#include <signal.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <syslog.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "jrnl.h"
 #include "jrnld.h"
@@ -34,9 +34,8 @@ static const char JRNL_ROOT_PATH[] = "/var/jrnl";
 static const char JRNL_PID_PATH[] = "/jrnl.pid"; /* relative root */
 
 /* handler function prototype */
-typedef void
-(*jrnl_daemon_handler)(struct jrnl *j)
-  __attribute__((noreturn, nonnull(1)));
+typedef void (*jrnl_daemon_handler)(struct jrnl *j)
+    __attribute__((noreturn, nonnull(1)));
 
 /* daemon information */
 struct jrnl_daemon {
@@ -50,40 +49,19 @@ struct jrnl_daemon {
 static struct jrnld_gret {
   struct jrnl_daemon *daemon;
   char *msg;
-} g_state = {
-  NULL,
-  NULL
-};
+} g_state = {NULL, NULL};
 
 /* prototypes */
-static void
-jrnld_signal_handler(int sig);
-
-static void
-jrnld_parent_signal_handler(int sig);
-
-static int
-jrnld_listen_handler(struct jrnl *j, int sock)
-  __attribute__((nonnull(1)));
-
-static void
-jrnld_worker(struct jrnl *j)
-  __attribute__((noreturn, nonnull(1)));
-
-static int
-jrnl_daemon(void *obj)
-  __attribute__((noreturn, nonnull(1)));
-
-static void
-jrnld_parent(struct jrnl_daemon *daemon)
-  __attribute__((noreturn, nonnull(1)));
-
-static void
-jrnld_drop_privileges(void);
-
-static void
-jrnld_signal(struct jrnl *j)
-  __attribute__((nonnull(1)));
+static void jrnld_signal_handler(int sig);
+static void jrnld_parent_signal_handler(int sig);
+static int jrnld_listen_handler(struct jrnl *j, int sock)
+    __attribute__((nonnull(1)));
+static void jrnld_worker(struct jrnl *j) __attribute__((noreturn, nonnull(1)));
+static int jrnl_daemon(void *obj) __attribute__((noreturn, nonnull(1)));
+static void jrnld_parent(struct jrnl_daemon *daemon)
+    __attribute__((noreturn, nonnull(1)));
+static void jrnld_drop_privileges(void);
+static void jrnld_signal(struct jrnl *j) __attribute__((nonnull(1)));
 
 void jrnld_signal_handler(int signal) {
   struct jrnl *j;
@@ -169,7 +147,8 @@ int jrnl_daemon(void *obj) {
   jrnld_signal(daemon->jrnl);
 
   /* signal success */
-  assert(write(g_state.daemon->chan[1], &bufsz, sizeof(bufsz)) == (ssize_t)sizeof(bufsz));
+  assert(write(g_state.daemon->chan[1], &bufsz, sizeof(bufsz)) ==
+         (ssize_t)sizeof(bufsz));
   assert(write(g_state.daemon->chan[1], buf, bufsz) == (ssize_t)bufsz);
   assert(close(g_state.daemon->chan[1]) != -1);
 
@@ -219,7 +198,8 @@ void jrnld_parent(struct jrnl_daemon *daemon) {
   g_state.daemon = daemon;
 
   /* fork
-     TODO: clone() with glibc causes numerous issues, try musl or -ffreestanding */
+     TODO: clone() with glibc causes numerous issues, try musl or -ffreestanding
+     */
   pid = fork();
   assert(pid != -1);
   if (pid == 0) {
@@ -233,8 +213,9 @@ void jrnld_parent(struct jrnl_daemon *daemon) {
   assert(signal(SIGCHLD, jrnld_parent_signal_handler) != SIG_ERR);
 
   /* block until signal */
-  assert(read(g_state.daemon->chan[0], &bufsz, sizeof(bufsz)) == (ssize_t)sizeof(bufsz));
-  buf = calloc(sizeof(uint8_t), bufsz+1);
+  assert(read(g_state.daemon->chan[0], &bufsz, sizeof(bufsz)) ==
+         (ssize_t)sizeof(bufsz));
+  buf = calloc(sizeof(uint8_t), bufsz + 1);
   assert(buf != NULL);
   assert(read(g_state.daemon->chan[0], buf, bufsz) == (ssize_t)bufsz);
   assert(close(g_state.daemon->chan[0]) != -1);

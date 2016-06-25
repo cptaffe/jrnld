@@ -6,8 +6,6 @@ struct jrnld_config {
   bool daemon;
 };
 
-extern void
-jrnld(struct jrnld_config config)
-  __attribute__((noreturn));
+extern void jrnld(struct jrnld_config config) __attribute__((noreturn));
 
 #endif /* JRNLD_H_ */
