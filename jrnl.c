@@ -1,24 +1,12 @@
 /* Copyright 2016 Connor Taffe */
 
 #include <assert.h>
-#include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <sched.h>
-#include <signal.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/un.h>
-#include <sys/wait.h>
 #include <syslog.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "jrnl.h"
@@ -34,7 +22,6 @@ struct jrnl_connection {
 
 static int jrnl_connection_worker(void *obj)
     __attribute__((noreturn, nonnull(1)));
-
 static void jrnl_server_init(struct jrnl *j) __attribute__((nonnull(1)));
 
 /* set up unix socket server */
